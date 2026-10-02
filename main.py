@@ -14,6 +14,7 @@ extension_list = (
     "src.discordbot.fun",
     "src.discordbot.seal",
     "src.discordbot.music",
+    "src.discordbot.embedfix",
 )
 
 

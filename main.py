@@ -13,6 +13,7 @@ extension_list = (
     "src.discordbot.remind",
     "src.discordbot.fun",
     "src.discordbot.seal",
+    "src.discordbot.music",
 )
 
 

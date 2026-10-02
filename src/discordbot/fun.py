@@ -62,6 +62,5 @@ class FunCog(commands.Cog):
         except discord.HTTPException:
             pass
 
-
 async def setup(bot):
     await bot.add_cog(FunCog(bot))

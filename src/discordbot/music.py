@@ -6,6 +6,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
+from urllib.parse import quote
 
 import aiohttp
 import discord
@@ -19,25 +20,25 @@ MAX_LINKS_PER_MESSAGE = 3
 EMBED_COLOR = discord.Color.from_rgb(88, 101, 242)
 
 SPOTIFY_URL = re.compile(
-    r"https?://open\.spotify\.com/(?:intl-[a-z]{2}/)?(?P<kind>track|album)/(?P<id>[A-Za-z0-9]{22})",
+    r"https?://open\.spotify\.com/(?:intl-[a-z]{2}/)?(?P<kind>track|album|artist)/(?P<id>[A-Za-z0-9]{22})",
     re.I,
 )
 APPLE_URL = re.compile(
-    r"https?://(?:geo\.)?music\.apple\.com/(?P<country>[a-z]{2})/(?P<kind>album|song)/"
+    r"https?://(?:geo\.)?music\.apple\.com/(?P<country>[a-z]{2})/(?P<kind>album|song|artist)/"
     r"(?:[^/?#\s>]+/)?(?P<id>\d+)(?:\?[^\s>]*?\bi=(?P<track>\d+))?",
     re.I,
 )
 YOUTUBE_MUSIC_URL = re.compile(
     r"https?://music\.youtube\.com/(?:watch\?(?:[^\s>]*?&)?v=(?P<video>[\w-]{11})"
-    r"|playlist\?(?:[^\s>]*?&)?list=(?P<playlist>[\w-]+))",
+    r"|playlist\?(?:[^\s>]*?&)?list=(?P<playlist>[\w-]+)|channel/(?P<channel>UC[\w-]{22}))",
     re.I,
 )
 TIDAL_URL = re.compile(
-    r"https?://(?:listen\.)?tidal\.com/(?:browse/)?(?P<kind>track|album)/(?P<id>\d+)",
+    r"https?://(?:listen\.)?tidal\.com/(?:browse/)?(?P<kind>track|album|artist)/(?P<id>\d+)",
     re.I,
 )
 DEEZER_URL = re.compile(
-    r"https?://(?:www\.)?deezer\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?(?P<kind>track|album)/(?P<id>\d+)",
+    r"https?://(?:www\.)?deezer\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?(?P<kind>track|album|artist)/(?P<id>\d+)",
     re.I,
 )
 DEEZER_SHORT_URL = re.compile(r"https?://(?:deezer\.page\.link|link\.deezer\.com/s)/[\w-]+", re.I)
@@ -133,10 +134,15 @@ def artist_similarity(first, second):
 
 
 def best_match(candidates, media, threshold=0.78):
+    if media.kind == "artist":
+        threshold = max(threshold, 0.9)
     best, best_score = None, 0.0
     for candidate in candidates:
         title_score = SequenceMatcher(None, normalize(candidate.title), normalize(media.title)).ratio()
-        score = 0.65 * title_score + 0.35 * artist_similarity(candidate.artist, media.artist)
+        if media.kind == "artist":
+            score = title_score
+        else:
+            score = 0.65 * title_score + 0.35 * artist_similarity(candidate.artist, media.artist)
         if score > best_score:
             best, best_score = candidate, score
     return best if best_score >= threshold else None
@@ -171,11 +177,15 @@ def extract_refs(text):
             add(Ref("apple", "track", match["track"], country))
         elif match["kind"].lower() == "song":
             add(Ref("apple", "track", match["id"], country))
+        elif match["kind"].lower() == "artist":
+            add(Ref("apple", "artist", match["id"], country))
         else:
             add(Ref("apple", "album", match["id"], country))
     for match in YOUTUBE_MUSIC_URL.finditer(text):
         if match["video"]:
             add(Ref("youtube", "track", match["video"]))
+        elif match["channel"]:
+            add(Ref("youtube", "artist", match["channel"]))
         else:
             add(Ref("youtube", "album", match["playlist"]))
     for match in TIDAL_URL.finditer(text):
@@ -252,7 +262,7 @@ class Spotify(Provider):
         images = album.get("images") or []
         return Candidate(
             item["name"],
-            ", ".join(artist["name"] for artist in item["artists"]),
+            ", ".join(artist["name"] for artist in item.get("artists", [])),
             item["external_urls"]["spotify"],
             images[0]["url"] if images else None,
         )
@@ -305,7 +315,7 @@ class AppleMusic(Provider):
     api = "https://itunes.apple.com"
 
     def canonical(self, ref):
-        path = "song" if ref.kind == "track" else "album"
+        path = {"track": "song", "album": "album", "artist": "artist"}[ref.kind]
         return f"https://music.apple.com/{ref.country}/{path}/{ref.ident}"
 
     @staticmethod
@@ -323,6 +333,8 @@ class AppleMusic(Provider):
         if not data["results"]:
             raise Unresolvable(ref.ident)
         item = data["results"][0]
+        if ref.kind == "artist":
+            return Media(ref.kind, item["artistName"], "")
         return Media(
             ref.kind,
             item.get("trackName") or item["collectionName"],
@@ -345,21 +357,28 @@ class AppleMusic(Provider):
             params={
                 "term": f"{media.title} {media.artist}",
                 "media": "music",
-                "entity": "song" if media.kind == "track" else "album",
+                "entity": {"track": "song", "album": "album", "artist": "musicArtist"}[media.kind],
                 "limit": 5,
                 "country": "us",
             },
         )
-        candidates = [
-            Candidate(
-                item.get("trackName") or item["collectionName"],
-                item["artistName"],
-                item.get("trackViewUrl") or item["collectionViewUrl"],
-                self.artwork(item.get("artworkUrl100")),
-            )
-            for item in data["results"]
-            if item.get("trackViewUrl") or item.get("collectionViewUrl")
-        ]
+        if media.kind == "artist":
+            candidates = [
+                Candidate(item["artistName"], "", item["artistLinkUrl"])
+                for item in data["results"]
+                if item.get("artistLinkUrl")
+            ]
+        else:
+            candidates = [
+                Candidate(
+                    item.get("trackName") or item["collectionName"],
+                    item["artistName"],
+                    item.get("trackViewUrl") or item["collectionViewUrl"],
+                    self.artwork(item.get("artworkUrl100")),
+                )
+                for item in data["results"]
+                if item.get("trackViewUrl") or item.get("collectionViewUrl")
+            ]
         chosen = best_match(candidates, media)
         return Match(self.clean(chosen.url), chosen.artwork) if chosen else None
 
@@ -377,6 +396,8 @@ class YouTubeMusic(Provider):
 
     @staticmethod
     def link(kind, ident):
+        if kind == "artist":
+            return f"https://music.youtube.com/channel/{ident}"
         if kind == "track":
             return f"https://music.youtube.com/watch?v={ident}"
         return f"https://music.youtube.com/playlist?list={ident}"
@@ -401,29 +422,37 @@ class YouTubeMusic(Provider):
             raise
 
     async def fetch(self, ref):
-        endpoint = "videos" if ref.kind == "track" else "playlists"
+        endpoint = {"track": "videos", "album": "playlists", "artist": "channels"}[ref.kind]
         data = await self.get(endpoint, part="snippet", id=ref.ident)
         if not data.get("items"):
             raise Unresolvable(ref.ident)
         snippet = data["items"][0]["snippet"]
+        if ref.kind == "artist":
+            return Media(ref.kind, re.sub(r" - Topic$", "", html.unescape(snippet["title"])), "", self.thumbnail(snippet))
         title, artist = split_youtube(snippet["title"], snippet["channelTitle"])
         if ref.kind == "album":
             title = re.sub(r"^Album - ", "", title)
         return Media(ref.kind, title, artist, self.thumbnail(snippet))
 
     async def find(self, media):
-        kind = "video" if media.kind == "track" else "playlist"
-        query = f"{media.title} {media.artist}" + ("" if kind == "video" else " album")
+        kind = {"track": "video", "album": "playlist", "artist": "channel"}[media.kind]
+        if kind == "channel":
+            query = media.title
+        else:
+            query = f"{media.title} {media.artist}" + ("" if kind == "video" else " album")
         params = {"part": "snippet", "type": kind, "q": query, "maxResults": 5}
         if kind == "video":
             params["videoCategoryId"] = "10"
         data = await self.get("search", **params)
         candidates = []
         for item in data.get("items", []):
-            ident = item["id"].get("videoId") or item["id"].get("playlistId")
+            ident = item["id"].get("videoId") or item["id"].get("playlistId") or item["id"].get("channelId")
             if not ident:
                 continue
-            title, artist = split_youtube(item["snippet"]["title"], item["snippet"]["channelTitle"])
+            if media.kind == "artist":
+                title, artist = re.sub(r" - Topic$", "", html.unescape(item["snippet"]["title"])), ""
+            else:
+                title, artist = split_youtube(item["snippet"]["title"], item["snippet"]["channelTitle"])
             candidates.append(Candidate(title, artist, self.link(media.kind, ident), self.thumbnail(item["snippet"])))
         chosen = best_match(candidates, media, threshold=0.7)
         return Match(chosen.url, chosen.artwork) if chosen else None
@@ -458,15 +487,18 @@ class Tidal(Provider):
         return max(links, key=lambda link: (link.get("meta") or {}).get("width", 0))["href"]
 
     async def fetch(self, ref):
-        include = "artists,albums" if ref.kind == "track" else "artists"
+        include = {"track": "artists,albums", "album": "artists", "artist": ""}[ref.kind]
+        params = {"countryCode": "US", **({"include": include} if include else {})}
         data = await request_json(
             self.http,
             "GET",
             f"{self.api}/{ref.kind}s/{ref.ident}",
-            params={"countryCode": "US", "include": include},
+            params=params,
             headers=await self.headers(),
         )
         main = data["data"]
+        if ref.kind == "artist":
+            return Media(ref.kind, main["attributes"]["name"], "", self.artwork(main))
         included = data.get("included", [])
         artists = ", ".join(item["attributes"]["name"] for item in included if item["type"] == "artists")
         album = next((item for item in included if item["type"] == "albums"), main if ref.kind == "album" else None)
@@ -479,7 +511,25 @@ class Tidal(Provider):
             main["attributes"].get("barcodeId"),
         )
 
+    async def find_artist(self, media):
+        data = await request_json(
+            self.http,
+            "GET",
+            f"{self.api}/searchResults/{quote(media.title, safe='')}",
+            params={"countryCode": "US", "include": "artists"},
+            headers=await self.headers(),
+        )
+        candidates = [
+            Candidate(item["attributes"]["name"], "", f"https://tidal.com/browse/artist/{item['id']}", self.artwork(item))
+            for item in data.get("included", [])
+            if item["type"] == "artists"
+        ]
+        chosen = best_match(candidates, media)
+        return Match(chosen.url, chosen.artwork) if chosen else None
+
     async def find(self, media):
+        if media.kind == "artist":
+            return await self.find_artist(media)
         if media.kind == "track" and media.isrc:
             path, params = "tracks", {"filter[isrc]": media.isrc}
         elif media.kind == "album" and media.upc:
@@ -518,11 +568,15 @@ class Deezer(Provider):
 
     @staticmethod
     def cover(kind, data):
+        if kind == "artist":
+            return data.get("picture_xl")
         album = data.get("album") or {} if kind == "track" else data
         return album.get("cover_xl")
 
     async def fetch(self, ref):
         data = await self.get(f"{ref.kind}/{ref.ident}")
+        if ref.kind == "artist":
+            return Media(ref.kind, data["name"], "", self.cover(ref.kind, data))
         return Media(
             ref.kind,
             data["title"],
@@ -546,11 +600,17 @@ class Deezer(Provider):
                 return self.to_match(media.kind, await self.get(path))
             except Unresolvable:
                 pass
-        data = await self.get(f"search/{media.kind}", q=f"{media.title} {media.artist}", limit=5)
-        candidates = [
-            Candidate(item["title"], item["artist"]["name"], item["link"], ident=str(item["id"]))
-            for item in data.get("data", [])
-        ]
+        data = await self.get(f"search/{media.kind}", q=f"{media.title} {media.artist}".strip(), limit=5)
+        if media.kind == "artist":
+            candidates = [
+                Candidate(item["name"], "", item["link"], ident=str(item["id"]))
+                for item in data.get("data", [])
+            ]
+        else:
+            candidates = [
+                Candidate(item["title"], item["artist"]["name"], item["link"], ident=str(item["id"]))
+                for item in data.get("data", [])
+            ]
         chosen = best_match(candidates, media)
         if chosen is None:
             return None
@@ -635,7 +695,7 @@ class MusicResolver(commands.Cog):
         media.links[source.key] = source.canonical(ref)
         remaining = [provider for provider in self.providers.values() if provider.key != source.key]
         deezer = self.providers.get("deezer")
-        if deezer in remaining and not (media.isrc or media.upc):
+        if deezer in remaining and media.kind != "artist" and not (media.isrc or media.upc):
             remaining.remove(deezer)
             self.merge(media, deezer, await self.safe_find(deezer, media))
         matches = await asyncio.gather(*(self.safe_find(provider, media) for provider in remaining))
@@ -676,7 +736,8 @@ class MusicResolver(commands.Cog):
             if provider.key in media.links
         ]
         embed = discord.Embed(title=media.title[:256], description="\n".join(lines), color=EMBED_COLOR)
-        embed.set_author(name=media.artist[:256] or "Unknown artist")
+        if media.artist:
+            embed.set_author(name=media.artist[:256])
         if media.artwork:
             embed.set_thumbnail(url=media.artwork)
         embed.set_footer(text=media.kind.title())

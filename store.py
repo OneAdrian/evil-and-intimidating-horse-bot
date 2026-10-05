@@ -14,7 +14,8 @@ create table if not exists guild_prefs (
     guild_id integer primary key,
     birthday_channel integer,
     seal_channel integer,
-    others_can_remind integer not null default 1
+    others_can_remind integer not null default 1,
+    soop_enabled integer not null default 0
 );
 create table if not exists remind_optouts (
     user_id integer primary key
@@ -40,7 +41,7 @@ create table if not exists seal_log (
 );
 """
 
-pref_defaults = {"birthday_channel": None, "seal_channel": None, "others_can_remind": 1}
+pref_defaults = {"birthday_channel": None, "seal_channel": None, "others_can_remind": 1, "soop_enabled": 0}
 
 
 class Store:
@@ -48,6 +49,10 @@ class Store:
         self.link = sqlite3.connect(path)
         self.link.row_factory = sqlite3.Row
         self.link.executescript(schema)
+        columns = {row["name"] for row in self.link.execute("pragma table_info(guild_prefs)")}
+        if "soop_enabled" not in columns:
+            self.link.execute("alter table guild_prefs add column soop_enabled integer not null default 0")
+            self.link.commit()
 
     def run(self, sql, *params):
         cursor = self.link.execute(sql, params)

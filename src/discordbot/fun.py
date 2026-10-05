@@ -48,6 +48,16 @@ class FunCog(commands.Cog):
         buffer.seek(0)
         await interaction.followup.send(file=discord.File(buffer, filename="image.png"))
 
+    @app_commands.command(name="soopinator", description="Turn the automatic soop server rename on or off")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(enabled="Whether messages containing soop rename the server")
+    async def soopinator(self, interaction: discord.Interaction, enabled: bool):
+        self.bot.store.set_pref(interaction.guild_id, "soop_enabled", int(enabled))
+        state = "on" if enabled else "off"
+        await interaction.response.send_message(f"Soop renaming is now {state} for this server.")
+
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot or message.webhook_id or message.guild is None:
@@ -57,10 +67,13 @@ class FunCog(commands.Cog):
             return
         if "soop" not in text.lower():
             return
+        if not self.bot.store.get_pref(message.guild.id, "soop_enabled"):
+            return
         try:
             await message.guild.edit(name=text, reason=f"soop rename by {message.author}")
         except discord.HTTPException:
             pass
+
 
 async def setup(bot):
     await bot.add_cog(FunCog(bot))

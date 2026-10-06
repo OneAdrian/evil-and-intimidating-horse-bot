@@ -29,6 +29,7 @@ There are two main behaviours:
 | TIDAL_CLIENT_ID`and `TIDAL_CLIENT_SECRET`       | TIDAL matching                           | optional; TIDAL will be skipped if absent                                                |
 | `YOUTUBE_API_KEY`                               | Youtube Music Matching                   | optional; YT will be skipped if absent                                                   |
 | `FONT_PATH`                                     | the font for `/fromsoft`                 | completely optional, only needed if agmena.ttf is anywhere that is NOT next to `main.py` |
+
 **Apple Music** and **Deezer** need no keys. As listed, if a music platform does not have credentials, it is skipped. `/search` is disabled if spotify keys are absent.
 - **Files**:
 	- **Font:** `agmena.ttf` must be in the folder you run the bot from, or `FONT_PATH` must point to it. In it's absence, `/fromsoft` is non-functional.

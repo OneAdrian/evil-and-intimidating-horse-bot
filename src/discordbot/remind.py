@@ -226,11 +226,9 @@ class RemindCog(commands.GroupCog, group_name="remind", group_description="Set a
         )
 
     @app_commands.command(name="list", description="List your active reminders")
-    @app_commands.describe(who="Only you can list your own reminders")
+    @app_commands.describe(who="List reminders for pinged user")
     async def list_mine(self, interaction: discord.Interaction, who: discord.Member | None = None):
         target = who or interaction.user
-        if target.id != interaction.user.id:
-            return await self.refuse(interaction, "Only the pinged user can list their own reminders.")
         rows = self.active_for(target.id, interaction.guild_id)
         if not rows:
             return await self.refuse(interaction, "No active reminders.")
@@ -241,9 +239,9 @@ class RemindCog(commands.GroupCog, group_name="remind", group_description="Set a
             lines.append(f"**{position}.** <t:{int(row['fire_at'])}:R>{' (repeats)' if repeating else ''}: {preview}")
         if len(rows) > 15:
             lines.append(f"...and {len(rows) - 15} more")
-        await self.refuse(interaction, "\n".join(lines))
+        await interaction.response.send_message("\n".join(lines), ephemeral=False)
 
-    @app_commands.command(name="remove", description="Remove one reminder by its number, or all of them")
+    @app_commands.command(name="remove", description="Remove one reminder by its number, or all of them if a number is not specified")
     @app_commands.describe(
         number="The number shown in /remind list, leave empty to remove all",
         who="Only you, unless you're an administrator",

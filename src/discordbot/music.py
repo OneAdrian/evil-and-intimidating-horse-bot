@@ -272,7 +272,7 @@ class Provider:
 class Spotify(Provider):
     key = "spotify"
     label = "Spotify"
-    emoji = "<:spotify:1556967644249464882>"
+    emoji = "<:spotify:YOUR-SPOTIFY-EMOJI-ID-HERE>"
     api = "https://api.spotify.com/v1"
 
     def __init__(self, http, client_id, client_secret):
@@ -377,7 +377,7 @@ class Spotify(Provider):
 class AppleMusic(Provider):
     key = "apple"
     label = "Apple Music"
-    emoji = "<:applemusic:1556967622325833738>"
+    emoji = "<:applemusic:YOUR-APPLE-EMOJI-ID-HERE>"
     api = "https://itunes.apple.com"
 
     def canonical(self, ref):
@@ -452,7 +452,7 @@ class AppleMusic(Provider):
 class YouTubeMusic(Provider):
     key = "youtube"
     label = "YouTube Music"
-    emoji = "<:youtubemusic:1556967613035188325>"
+    emoji = "<:youtubemusic:YOUR-YOUTUBE-EMOJI-ID-HERE>"
     api = "https://www.googleapis.com/youtube/v3"
 
     def __init__(self, http, api_key):
@@ -527,7 +527,7 @@ class YouTubeMusic(Provider):
 class Tidal(Provider):
     key = "tidal"
     label = "Tidal"
-    emoji = "<:tidal:1556967451525124096>"
+    emoji = "<:tidal:YOUR-TIDAL-EMOJI-ID-HERE>"
     api = "https://openapi.tidal.com/v2"
 
     def __init__(self, http, client_id, client_secret):
@@ -617,7 +617,7 @@ class Tidal(Provider):
 class Deezer(Provider):
     key = "deezer"
     label = "Deezer"
-    emoji = "<:deezer:1556967632580771881>"
+    emoji = "<:deezer:YOUR-DEEZER-EMOJI-ID-HERE>"
     api = "https://api.deezer.com"
 
     def canonical(self, ref):

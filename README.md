@@ -63,7 +63,7 @@ There are two main behaviours:
 	YOUTUBE_API_KEY='your-youtube-data-api-key'
 	```
 	 Put `agmena.ttf` in the project folder
- - When having created the bot on discord, with the permissions above listed, **make sure to upload the following emoji to the 'app emojis' slot (case sensitive):
+ - When having created the bot on discord, with the permissions above listed, **make sure to upload the following emoji to the 'app emojis' slot (case sensitive):**
 	 - `spotify`
 	 - `deezer`
 	 - `applemusic`
@@ -72,10 +72,10 @@ There are two main behaviours:
  - After having done this, replace the placeholder emoji IDs with the ones from your bot dashboard. Example Below:
 	```python
 	class Spotify(Provider):
-    key = "spotify"
-    label = "Spotify"
-    emoji = "<:spotify:YOUR-SPOTIFY-EMOJI-ID>" # Simply replace the caps text.
-    api = "https://api.spotify.com/v1"
+	    key = "spotify"
+	    label = "Spotify"
+	    emoji = "<:spotify:YOUR-SPOTIFY-EMOJI-ID>" # Simply replace the caps text.
+	    api = "https://api.spotify.com/v1"
 	```
  - Run the project!
 	```sh

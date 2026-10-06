@@ -307,7 +307,7 @@ class RemindCog(commands.GroupCog, group_name="remind", group_description="Set a
         text = f"Reminder from <t:{int(row['made_at'])}:R>:\n{row['body']}"
         if row["sender_id"] != row["target_id"]:
             text += f"\n\nSet by <@{row['sender_id']}>"
-        embed = discord.Embed(title="Reminder", description=text, colour=discord.Colour.blurple())
+        embed = discord.Embed(title="Reminder", description=text, colour=discord.Colour.from_rgb(134, 77, 232))
         pings = discord.AllowedMentions(
             users=[discord.Object(id=row["target_id"])], roles=False, everyone=False
         )

@@ -1,5 +1,7 @@
 import asyncio
+import colorsys
 import html
+import io
 import logging
 import os
 import re
@@ -10,14 +12,22 @@ from urllib.parse import quote
 
 import aiohttp
 import discord
+from PIL import Image
 from cachetools import TTLCache
+from discord import app_commands
 from discord.ext import commands
 
 log = logging.getLogger("music_resolver")
 
 TIMEOUT = aiohttp.ClientTimeout(total=8)
 MAX_LINKS_PER_MESSAGE = 3
-EMBED_COLOR = discord.Color.from_rgb(88, 101, 242)
+BASE_COLOR = (134, 77, 232)
+EMBED_COLOR = discord.Color.from_rgb(*BASE_COLOR)
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+MIN_SATURATION = 0.4
+MIN_BRIGHTNESS = 0.35
+MIN_VIVID_SHARE = 0.05
+HUE_BINS = 12
 
 SPOTIFY_URL = re.compile(
     r"https?://open\.spotify\.com/(?:intl-[a-z]{2}/)?(?P<kind>track|album|artist)/(?P<id>[A-Za-z0-9]{22})",
@@ -163,6 +173,27 @@ def split_youtube(title, channel):
     return title, channel
 
 
+def dominant_color(data):
+    with Image.open(io.BytesIO(data)) as image:
+        image.draft("RGB", (96, 96))
+        small = image.convert("RGB")
+    small.thumbnail((48, 48))
+    pixels = list(small.getdata())
+    hues = {}
+    for pixel in pixels:
+        hue, saturation, value = colorsys.rgb_to_hsv(*(channel / 255 for channel in pixel))
+        if saturation >= MIN_SATURATION and value >= MIN_BRIGHTNESS:
+            hues.setdefault(int(hue * HUE_BINS + 0.5) % HUE_BINS, []).append(pixel)
+    if sum(len(group) for group in hues.values()) >= len(pixels) * MIN_VIVID_SHARE:
+        group = max(hues.values(), key=len)
+    else:
+        buckets = {}
+        for pixel in pixels:
+            buckets.setdefault(tuple(channel >> 5 for channel in pixel), []).append(pixel)
+        group = max(buckets.values(), key=len)
+    return tuple(round(sum(channel) / len(group)) for channel in zip(*group))
+
+
 def extract_refs(text):
     found = {}
 
@@ -241,7 +272,7 @@ class Provider:
 class Spotify(Provider):
     key = "spotify"
     label = "Spotify"
-    emoji = "🟢"
+    emoji = "<:spotify:1556967644249464882>"
     api = "https://api.spotify.com/v1"
 
     def __init__(self, http, client_id, client_secret):
@@ -282,6 +313,41 @@ class Spotify(Provider):
             external_ids.get("upc"),
         )
 
+    @staticmethod
+    def rank(item, query, artist):
+        score = SequenceMatcher(None, normalize(item["name"]), normalize(query)).ratio()
+        if artist:
+            score += max((artist_similarity(entry["name"], artist) for entry in item.get("artists", [])), default=0.0)
+        return score
+
+    async def top_result(self, query, kind, artist=None, album=None):
+        def clean(text):
+            return text.replace('"', " ").strip()
+
+        if kind == "artist":
+            attempts = [query]
+        else:
+            strict = f'{kind}:"{clean(query)}"'
+            if artist:
+                strict += f' artist:"{clean(artist)}"'
+            if album and kind == "track":
+                strict += f' album:"{clean(album)}"'
+            attempts = [strict, " ".join(filter(None, (query, artist, album if kind == "track" else None)))]
+        headers = await self.credentials.headers()
+        for text in attempts:
+            data = await request_json(
+                self.http,
+                "GET",
+                f"{self.api}/search",
+                params={"q": text, "type": kind, "limit": 10},
+                headers=headers,
+            )
+            items = [item for item in (data.get(f"{kind}s") or {}).get("items") or [] if item]
+            if items:
+                best = max(items, key=lambda item: self.rank(item, query, artist))
+                return best["external_urls"]["spotify"]
+        return None
+
     async def find(self, media):
         headers = await self.credentials.headers()
         identifier = None
@@ -311,7 +377,7 @@ class Spotify(Provider):
 class AppleMusic(Provider):
     key = "apple"
     label = "Apple Music"
-    emoji = "🍎"
+    emoji = "<:applemusic:1556967622325833738>"
     api = "https://itunes.apple.com"
 
     def canonical(self, ref):
@@ -386,7 +452,7 @@ class AppleMusic(Provider):
 class YouTubeMusic(Provider):
     key = "youtube"
     label = "YouTube Music"
-    emoji = "🔴"
+    emoji = "<:youtubemusic:1556967613035188325>"
     api = "https://www.googleapis.com/youtube/v3"
 
     def __init__(self, http, api_key):
@@ -461,7 +527,7 @@ class YouTubeMusic(Provider):
 class Tidal(Provider):
     key = "tidal"
     label = "Tidal"
-    emoji = "🌊"
+    emoji = "<:tidal:1556967451525124096>"
     api = "https://openapi.tidal.com/v2"
 
     def __init__(self, http, client_id, client_secret):
@@ -551,7 +617,7 @@ class Tidal(Provider):
 class Deezer(Provider):
     key = "deezer"
     label = "Deezer"
-    emoji = "🟣"
+    emoji = "<:deezer:1556967632580771881>"
     api = "https://api.deezer.com"
 
     def canonical(self, ref):
@@ -634,6 +700,7 @@ class MusicResolver(commands.Cog):
                 log.info("%s disabled, missing credentials", provider.label)
         self.cache = TTLCache(maxsize=512, ttl=3600)
         self.failures = TTLCache(maxsize=256, ttl=300)
+        self.colors = TTLCache(maxsize=512, ttl=3600)
         self.pending = {}
         self.cooldowns = {}
 
@@ -755,6 +822,99 @@ class MusicResolver(commands.Cog):
                 )
         return view
 
+    async def artwork_color(self, url):
+        if not url:
+            return None
+        if url in self.colors:
+            return self.colors[url]
+        color = None
+        try:
+            async with self.http.get(url, timeout=TIMEOUT) as response:
+                response.raise_for_status()
+                chunks, size = [], 0
+                async for chunk in response.content.iter_chunked(65536):
+                    size += len(chunk)
+                    if size > MAX_IMAGE_BYTES:
+                        raise ValueError("image too large")
+                    chunks.append(chunk)
+            color = await asyncio.to_thread(dominant_color, b"".join(chunks))
+        except Exception:
+            log.warning("could not read a color from %s", url, exc_info=True)
+        self.colors[url] = color
+        return color
+
+    async def render(self, media):
+        global EMBED_COLOR
+        color = await self.artwork_color(media.artwork)
+        EMBED_COLOR = discord.Color.from_rgb(*(color or BASE_COLOR))
+        try:
+            return {"embed": self.build_embed(media), "view": self.build_view(media)}
+        finally:
+            EMBED_COLOR = discord.Color.from_rgb(*BASE_COLOR)
+
+    async def fail_search(self, interaction, text):
+        try:
+            await interaction.delete_original_response()
+        except discord.HTTPException:
+            pass
+        await interaction.followup.send(text, ephemeral=True)
+
+    @app_commands.command(name="search", description="Search for a song, artist or album, and get a link for every platform")
+    @app_commands.describe(
+        query="Song, Album or Artist name to search for",
+        type="Optional: Kind of result you're looking for, e.g. Album, Song. If none, defaults to Song",
+        artist="Optional: The artist, for songs and albums",
+        album="Optional: The album, for songs",
+    )
+    @app_commands.choices(
+        type=[
+            app_commands.Choice(name="Artist", value="artist"),
+            app_commands.Choice(name="Album", value="album"),
+            app_commands.Choice(name="Song", value="track"),
+        ]
+    )
+    async def search(
+        self,
+        interaction: discord.Interaction,
+        query: app_commands.Range[str, 1, 200],
+        type: app_commands.Choice[str] | None = None,
+        artist: app_commands.Range[str, 1, 100] | None = None,
+        album: app_commands.Range[str, 1, 100] | None = None,
+    ):
+        if type is None:
+            type = app_commands.Choice(name="song", value="track")
+        
+        spotify = self.providers.get("spotify")
+        if spotify is None:
+            return await interaction.response.send_message("Spotify search isn't set up on this bot.", ephemeral=True)
+        if self.cooling(spotify):
+            return await interaction.response.send_message(
+                "Spotify is rate limiting me right now, try again in a bit.", ephemeral=True
+            )
+        await interaction.response.defer()
+        try:
+            url = await spotify.top_result(query, type.value, artist, album)
+        except RateLimited as error:
+            self.cool(spotify, error.retry_after)
+            return await self.fail_search(interaction, "Spotify is rate limiting me right now, try again in a bit.")
+        except (ProviderTimeout, aiohttp.ClientError, Unresolvable) as error:
+            log.warning("spotify search failed: %s", error)
+            return await self.fail_search(interaction, "I couldn't reach Spotify, try again in a moment.")
+        except Exception:
+            log.exception("spotify search crashed")
+            return await self.fail_search(interaction, "Something broke while searching Spotify.")
+        if url is None:
+            return await self.fail_search(
+                interaction, f"Spotify found no {type.name.lower()} matching \"{query[:100]}\"."
+            )
+        refs = extract_refs(url)
+        media = await self.resolve(refs[0]) if refs else None
+        if media is None:
+            return await self.fail_search(
+                interaction, f"Spotify found {url} but I couldn't load its details right now. If this happens, please contact Adrian."
+            )
+        await interaction.followup.send(**await self.render(media))
+
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot or message.guild is None or not message.content:
@@ -772,9 +932,8 @@ class MusicResolver(commands.Cog):
             if media is None or len(media.links) < 2:
                 continue
             try:
-                await message.reply(
-                    embed=self.build_embed(media), view=self.build_view(media), mention_author=False
-                )
+                payload = await self.render(media)
+                await message.reply(**payload, mention_author=False)
             except discord.HTTPException:
                 log.warning("could not send music embed in channel %s", message.channel.id)
 

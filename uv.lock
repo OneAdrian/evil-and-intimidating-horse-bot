@@ -201,6 +201,7 @@ dependencies = [
     { name = "discord-py" },
     { name = "fromsoft-generator" },
     { name = "geonamescache" },
+    { name = "pillow" },
     { name = "tzdata" },
 ]
 
@@ -211,6 +212,7 @@ requires-dist = [
     { name = "discord-py", specifier = ">=2.7.1" },
     { name = "fromsoft-generator", specifier = ">=1.0.1" },
     { name = "geonamescache", specifier = ">=3.0.2" },
+    { name = "pillow", specifier = ">=12.3.0" },
     { name = "tzdata", specifier = ">=2026.4" },
 ]
 

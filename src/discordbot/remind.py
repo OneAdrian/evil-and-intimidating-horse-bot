@@ -108,6 +108,13 @@ class RemindCog(commands.GroupCog, group_name="remind", group_description="Set a
         row = self.bot.store.one("select count(*) as amount from reminders where sender_id = ?", sender_id)
         return row["amount"] >= max_active
 
+    def active_for(self, target_id, guild_id):
+        return self.bot.store.many(
+            "select * from reminders where target_id = ? and guild_id = ? order by fire_at, id",
+            target_id,
+            guild_id,
+        )
+
     def third_party_problem(self, guild_id, target):
         if not self.bot.store.get_pref(guild_id, "others_can_remind"):
             return "Reminders for other people are turned off in this server."
@@ -224,35 +231,56 @@ class RemindCog(commands.GroupCog, group_name="remind", group_description="Set a
         target = who or interaction.user
         if target.id != interaction.user.id:
             return await self.refuse(interaction, "Only the pinged user can list their own reminders.")
-        rows = self.bot.store.many(
-            "select * from reminders where target_id = ? and guild_id = ? order by fire_at",
-            target.id,
-            interaction.guild_id,
-        )
+        rows = self.active_for(target.id, interaction.guild_id)
         if not rows:
             return await self.refuse(interaction, "No active reminders.")
         lines = []
-        for row in rows[:15]:
+        for position, row in enumerate(rows[:15], start=1):
             repeating = row["every_seconds"] is not None or row["clock_hour"] is not None
             preview = row["body"].replace("\n", " ")[:60]
-            lines.append(f"<t:{int(row['fire_at'])}:R>{' (repeats)' if repeating else ''}: {preview}")
+            lines.append(f"**{position}.** <t:{int(row['fire_at'])}:R>{' (repeats)' if repeating else ''}: {preview}")
         if len(rows) > 15:
             lines.append(f"...and {len(rows) - 15} more")
         await self.refuse(interaction, "\n".join(lines))
 
-    @app_commands.command(name="remove", description="Remove all active reminders for a user")
-    @app_commands.describe(who="Only you, unless you're an administrator")
-    async def remove_all(self, interaction: discord.Interaction, who: discord.Member | None = None):
+    @app_commands.command(name="remove", description="Remove one reminder by its number, or all of them")
+    @app_commands.describe(
+        number="The number shown in /remind list, leave empty to remove all",
+        who="Only you, unless you're an administrator",
+    )
+    async def remove(
+        self,
+        interaction: discord.Interaction,
+        number: app_commands.Range[int, 1, 1000] | None = None,
+        who: discord.Member | None = None,
+    ):
         target = who or interaction.user
         is_admin = interaction.user.guild_permissions.administrator
         if target.id != interaction.user.id and not is_admin:
             return await self.refuse(
                 interaction, f"Only {target.display_name} can manage their own reminders."
             )
-        cursor = self.bot.store.run(
-            "delete from reminders where target_id = ? and guild_id = ?", target.id, interaction.guild_id
+        if number is None:
+            cursor = self.bot.store.run(
+                "delete from reminders where target_id = ? and guild_id = ?", target.id, interaction.guild_id
+            )
+            return await self.refuse(interaction, f"Removed {cursor.rowcount} reminder(s) for {target.display_name}.")
+        rows = self.active_for(target.id, interaction.guild_id)
+        if not rows:
+            return await self.refuse(interaction, f"{target.display_name} has no active reminders.")
+        if number > len(rows):
+            return await self.refuse(
+                interaction, f"{target.display_name} only has {len(rows)} active reminder(s)."
+            )
+        row = rows[number - 1]
+        self.bot.store.run("delete from reminders where id = ?", row["id"])
+        repeating = row["every_seconds"] is not None or row["clock_hour"] is not None
+        preview = row["body"].replace("\n", " ")[:80]
+        await interaction.response.send_message(
+            f"Removed reminder {number}{' (it repeated)' if repeating else ''}: {preview}",
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
         )
-        await self.refuse(interaction, f"Removed {cursor.rowcount} reminder(s) for {target.display_name}.")
 
     @app_commands.command(name="others", description="Allow or block other people from reminding you")
     @app_commands.describe(allowed="True to let others set reminders for you")

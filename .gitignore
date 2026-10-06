@@ -16,3 +16,6 @@ agmena.ttf
 .vscode
 *.db
 bot.db
+tidalapikeys
+src/discordbot/addons/
+# ^ stuff I made but ended up scrapping but want to keep as storage for the future

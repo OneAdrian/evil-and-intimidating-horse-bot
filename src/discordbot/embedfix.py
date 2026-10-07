@@ -11,7 +11,7 @@ EMBED_DOMAINS = {
     "x.com": "boypussyx.com",
     "twitter.com": "boypussyx.com",
     "tumblr.com": "tpmblr.com",
-    "reddit.com": "rxddit.com",
+    "reddit.com": "fxreddit.com",
     "pixiv.net": "phixiv.net",
     "bsky.app": "bsyy.app",
     "instagram.com": "kkinstagram.com",

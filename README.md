@@ -10,6 +10,7 @@ There are two main behaviours:
 	- `on_message` handlers do music link embeds, embed fixer and the soopinator
 	- `ticker` delivers due reminders
 	- `daily_seal` posts the seal at 15:00 in the `/sealect`ed channel
+	- `chatter.py` set of varied listeners for reply purposes.
 
 **State** lives in one SQLite file (bot.db) through `Store`, a thin wrapper with `run`, `one`,`many`,`get_pref` and `set_pref`. `guild_prefs` also live here, and these hold the server settings for the bot, such as soopinator being on or the selected seal or birthday channel.
 

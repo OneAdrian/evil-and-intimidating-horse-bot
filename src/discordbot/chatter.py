@@ -51,7 +51,7 @@ HUNGER_PATTERNS = [
     re.compile(r"\b(?:tummy|belly|stomach|tum)\s+(?:is\s+|'s\s+)?(?:growl|rumbl|empty)\w*", re.I),
 ]
 SEAL_PATTERN = re.compile(r"\b(?:seals?|sealions?|sea\s+lions?|pinnipeds?|walrus(?:es)?)\b", re.I)
-HORSE_WORD = r"(?:horsey|horseys|horsie|horsies|uma|umas|uma\s*musumes?)"
+HORSE_WORD = r"(?:horsey|horseys|horsie|horsies|honse[sy]*|uma\w*)"
 HORSEY_PATTERN = re.compile(
     rf"\b{HORSE_WORD}\b|\bone\s+of\s+(?:my|the|our|your|his|her|their|these|those)\s+(?:horses?|{HORSE_WORD})\b",
     re.I,

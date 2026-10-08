@@ -18,12 +18,12 @@ HORSE_DIR = Path("./assets/horses")
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 KLIPY_URL = "https://api.klipy.com/api/v1/{key}/gifs/search"
 
-ER_CHANCE = 1 / 1
-HUNGER_CHANCE = 1 / 1
-SEAL_CHANCE = 1 / 1
-HORSEY_CHANCE = 1 / 1
+ER_CHANCE = 1 / 5
+HUNGER_CHANCE = 1 / 5
+SEAL_CHANCE = 1 / 15
+HORSEY_CHANCE = 1 / 4
 SPECIAL_UMA_CHANCE = 1 / 8
-RECENT_LIMIT = 10
+RECENT_LIMIT = 20
 
 SEAL_QUERIES = ["seal", "sea lion", "walrus"]
 SPECIAL_UMAS = ["Oguri Cap", "TM Opera O", "Seiun Sky", "Manhattan Cafe"]
